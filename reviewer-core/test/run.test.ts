@@ -135,4 +135,65 @@ describe('reviewPullRequest (engine)', () => {
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.every((s) => s === 'sess-abc')).toBe(true);
   });
+
+  describe('costUsd aggregation across chunks', () => {
+    /** LLM stub that reports a fixed per-call cost sequence (one entry per chunk). */
+    function llmWithCosts(costs: (number | null)[]): LLMProvider {
+      let call = 0;
+      return {
+        id: 'openrouter',
+        async completeStructured<T>(req): Promise<StructuredResult<T>> {
+          return {
+            data: fixture as unknown as T,
+            model: req.model,
+            tokensIn: 10,
+            tokensOut: 5,
+            costUsd: costs[call++] ?? null,
+            raw: '',
+            attempts: 1,
+          };
+        },
+        async listModels() {
+          return [];
+        },
+        async complete() {
+          throw new Error('not used');
+        },
+        async embed() {
+          return [];
+        },
+      };
+    }
+
+    /** Two-file diff → map-reduce makes one LLM call per file. */
+    async function twoFileDiff() {
+      const diff = await new MockGitClient().diff();
+      return { ...diff, files: [diff.files[0]!, { ...diff.files[0]!, path: 'src/other.ts' }] };
+    }
+
+    it('sums costUsd over all map-reduce chunks', async () => {
+      const outcome = await reviewPullRequest({
+        systemPrompt: 's',
+        model: 'm',
+        diff: await twoFileDiff(),
+        llm: llmWithCosts([0.001, 0.002]),
+        strategy: 'map-reduce',
+      });
+      expect(outcome.mode).toBe('map-reduce');
+      expect(outcome.tokensIn).toBe(20);
+      expect(outcome.costUsd).toBeCloseTo(0.003, 10);
+    });
+
+    it('is null when any chunk has an unknown cost (never a misleading partial sum)', async () => {
+      const outcome = await reviewPullRequest({
+        systemPrompt: 's',
+        model: 'm',
+        diff: await twoFileDiff(),
+        llm: llmWithCosts([0.001, null]),
+        strategy: 'map-reduce',
+      });
+      expect(outcome.mode).toBe('map-reduce');
+      expect(outcome.costUsd).toBeNull();
+    });
+  });
 });

@@ -19,8 +19,11 @@ const TRACE: RunTrace = {
   ],
 };
 
+// `current` is read lazily by the mock, so a test can swap the trace it renders.
+let current: RunTrace = TRACE;
+
 vi.mock("../../../../../../../lib/hooks/trace", () => ({
-  useRunTrace: () => ({ data: TRACE, isLoading: false }),
+  useRunTrace: () => ({ data: current, isLoading: false }),
 }));
 vi.mock("../../../../../../../lib/hooks/reviews", () => ({
   useRunEvents: () => ({ events: [], running: false }),
@@ -28,7 +31,10 @@ vi.mock("../../../../../../../lib/hooks/reviews", () => ({
 
 import RunTraceDrawer from "./RunTraceDrawer";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  current = TRACE;
+});
 
 function renderWithIntl(ui: React.ReactElement) {
   return render(
@@ -45,6 +51,30 @@ describe("A5 Run Trace drawer (smoke)", () => {
     expect(screen.getByText("Stats")).toBeInTheDocument();
     expect(screen.getByText("2/2 passed")).toBeInTheDocument();
     expect(screen.getByText("Tool calls")).toBeInTheDocument();
+  });
+
+  it("shows the COST tile with the formatted run cost, between TOKENS and FINDINGS", () => {
+    current = { ...TRACE, stats: { ...TRACE.stats, cost_usd: 0.06 } };
+    renderWithIntl(<RunTraceDrawer runId="r1" agentName="Security" prNumber={482} onClose={() => {}} />);
+    const labels = ["DURATION", "TOKENS", "COST", "FINDINGS"].map((l) => screen.getByText(l));
+    expect(screen.getByText("COST").nextElementSibling).toHaveTextContent("$0.060");
+    // tile order in the DOM: DURATION, TOKENS, COST, FINDINGS
+    for (let i = 1; i < labels.length; i++) {
+      expect(labels[i - 1]!.compareDocumentPosition(labels[i]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
+  it("shows an em dash in the COST tile when cost is null or absent (old traces)", () => {
+    current = { ...TRACE, stats: { ...TRACE.stats, cost_usd: null } };
+    const { unmount } = renderWithIntl(
+      <RunTraceDrawer runId="r1" agentName="Security" prNumber={482} onClose={() => {}} />,
+    );
+    expect(screen.getByText("COST").nextElementSibling).toHaveTextContent("—");
+    unmount();
+
+    current = TRACE; // fixture has no cost_usd key at all
+    renderWithIntl(<RunTraceDrawer runId="r1" agentName="Security" prNumber={482} onClose={() => {}} />);
+    expect(screen.getByText("COST").nextElementSibling).toHaveTextContent("—");
   });
 
   it("switches to the live log tab", () => {
