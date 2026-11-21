@@ -61,6 +61,8 @@ export const RunStats = z.object({
   duration_ms: z.number().int(),
   tokens_in: z.number().int(),
   tokens_out: z.number().int(),
+  // nullish: traces stored before cost was tracked have no key; null = unknown price.
+  cost_usd: z.number().nullish(),
   findings: z.number().int(),
   grounding: z.string(),
 });
@@ -101,6 +103,8 @@ export const RunSummary = z.object({
   duration_ms: z.number().int().nullable(),
   tokens_in: z.number().int().nullable(),
   tokens_out: z.number().int().nullable(),
+  // USD; null = unknown (old run, unknown-price model, failed/cancelled run).
+  cost_usd: z.number().nullable(),
   findings_count: z.number().int().nullable(),
   grounding: z.string().nullable(),
   ran_at: z.string().nullable(),
