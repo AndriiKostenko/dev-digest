@@ -202,12 +202,21 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     expect(trace.config.model).toBe('gpt-4.1');
     expect(trace.stats.grounding).toBe('1/2 passed');
     expect(trace.log.length).toBeGreaterThan(0);
+    // run cost (MockLLMProvider reports costUsd 0.001 per call) reaches the trace stats
+    expect(trace.stats.cost_usd).toBeGreaterThan(0);
 
     // agent_runs row populated for A5 to aggregate
     const [run] = await pg.handle.db.select().from(t.agentRuns).where(eq(t.agentRuns.id, runId));
     expect(run!.status).toBe('done');
     expect(run!.findingsCount).toBe(1);
     expect(run!.grounding).toBe('1/2 passed');
+    // …and is persisted on the row, identical to the trace value
+    expect(run!.costUsd).toBeGreaterThan(0);
+    expect(run!.costUsd).toBe(trace.stats.cost_usd);
+
+    // the PR timeline exposes the same per-run cost
+    const timeline = (await app.inject({ method: 'GET', url: `/pulls/${pr.id}/runs` })).json();
+    expect(timeline[0].cost_usd).toBe(run!.costUsd);
 
     await app.close();
   });

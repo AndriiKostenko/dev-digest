@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { PrMeta, PrDetail, GitHubClient, PrReviewComment } from '@devdigest/shared';
 import { PrCommentInput } from '@devdigest/shared';
 import * as t from '../../db/schema.js';
@@ -129,9 +129,31 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       }
     }
 
+    // Total run cost per PR for the list's COST column. SUM ignores NULL costs, so
+    // it is the sum of KNOWN costs (null when none is known). `partial` flags a PR
+    // where some run that actually called the LLM (tokens_in > 0) has an unknown
+    // cost; failed/cancelled runs write 0 tokens and running ones NULL, so neither
+    // trips it. float8 columns come back from postgres.js as JS numbers.
+    const costByPr = new Map<string, { cost: number | null; partial: boolean }>();
+    if (prIds.length > 0) {
+      const costRows = await container.db
+        .select({
+          prId: t.agentRuns.prId,
+          cost: sql<number | null>`sum(${t.agentRuns.costUsd})`,
+          partial: sql<boolean>`coalesce(bool_or(${t.agentRuns.tokensIn} > 0 and ${t.agentRuns.costUsd} is null), false)`,
+        })
+        .from(t.agentRuns)
+        .where(inArray(t.agentRuns.prId, prIds))
+        .groupBy(t.agentRuns.prId);
+      for (const c of costRows) {
+        if (c.prId) costByPr.set(c.prId, { cost: c.cost, partial: c.partial });
+      }
+    }
+
     const now = Date.now();
     return rows.map((r) => {
       const review = latestReviewByPr.get(r.id);
+      const cost = costByPr.get(r.id);
       return {
         id: r.id,
         number: r.number,
@@ -153,6 +175,8 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         opened_at: r.openedAt?.toISOString() ?? null,
         updated_at: r.updatedAt?.toISOString() ?? null,
         score: review ? review.score : null,
+        cost_usd: cost?.cost ?? null,
+        cost_partial: cost?.partial ?? false,
       };
     });
   });
