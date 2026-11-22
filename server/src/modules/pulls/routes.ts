@@ -1,8 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
-import type { PrMeta, PrDetail, GitHubClient, PrReviewComment } from '@devdigest/shared';
-import { PrCommentInput } from '@devdigest/shared';
+import { and, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import type {
+  PrMeta,
+  PrDetail,
+  GitHubClient,
+  PrReviewComment,
+  SeverityCounts,
+} from '@devdigest/shared';
+import { PrCommentInput, Severity } from '@devdigest/shared';
 import * as t from '../../db/schema.js';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
@@ -111,21 +117,65 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       }
     }
 
-    // Latest-review SCORE per PR for the list's score ring. Computed on read
-    // from reviews (no FK denorm); the list is small, so one IN-query + JS
-    // grouping is cheap. (The per-severity FINDINGS breakdown is intentionally
-    // not surfaced on the list — findings live on the PR detail page.)
+    // Latest-review SCORE per PR for the list's score ring, plus the latest
+    // review of EACH agent for the FINDINGS column. Computed on read from
+    // reviews (no FK denorm); the list is small, so IN-queries + JS grouping
+    // are cheap.
     const prIds = rows.map((r) => r.id);
     const latestReviewByPr = new Map<string, { score: number | null }>();
+    // review id → PR id, for the latest review of each (PR, agent) pair.
+    const latestAgentReviewPr = new Map<string, string>();
     if (prIds.length > 0) {
       const reviewRows = await container.db
-        .select({ prId: t.reviews.prId, score: t.reviews.score })
+        .select({
+          id: t.reviews.id,
+          prId: t.reviews.prId,
+          agentId: t.reviews.agentId,
+          score: t.reviews.score,
+        })
         .from(t.reviews)
         .where(and(inArray(t.reviews.prId, prIds), eq(t.reviews.kind, 'review')))
         .orderBy(desc(t.reviews.createdAt));
-      // Rows are newest-first → first seen per PR is the latest review.
+      // Rows are newest-first → first seen per PR (and per PR+agent) is the latest.
+      const seenAgent = new Set<string>();
       for (const rv of reviewRows) {
         if (!latestReviewByPr.has(rv.prId)) latestReviewByPr.set(rv.prId, { score: rv.score });
+        // A review without an agent cannot be grouped, so it counts on its own.
+        const agentKey = `${rv.prId}:${rv.agentId ?? rv.id}`;
+        if (!seenAgent.has(agentKey)) {
+          seenAgent.add(agentKey);
+          latestAgentReviewPr.set(rv.id, rv.prId);
+        }
+      }
+    }
+
+    // FINDINGS column: open (non-dismissed) findings per severity, summed over
+    // the latest review of each agent — a re-run never double-counts and a
+    // multi-agent run never hides another agent's findings. A reviewed PR always
+    // gets counts (all zeros allowed); a never-reviewed PR stays null.
+    const findingCountsByPr = new Map<string, SeverityCounts>();
+    for (const prId of latestAgentReviewPr.values()) {
+      if (!findingCountsByPr.has(prId)) {
+        findingCountsByPr.set(prId, { CRITICAL: 0, WARNING: 0, SUGGESTION: 0 });
+      }
+    }
+    if (latestAgentReviewPr.size > 0) {
+      const countRows = await container.db
+        .select({ reviewId: t.findings.reviewId, severity: t.findings.severity, n: count() })
+        .from(t.findings)
+        .where(
+          and(
+            inArray(t.findings.reviewId, [...latestAgentReviewPr.keys()]),
+            isNull(t.findings.dismissedAt),
+          ),
+        )
+        .groupBy(t.findings.reviewId, t.findings.severity);
+      for (const c of countRows) {
+        const prId = latestAgentReviewPr.get(c.reviewId);
+        const counts = prId ? findingCountsByPr.get(prId) : undefined;
+        // `severity` is free text in the DB; ignore anything off-contract.
+        const sev = Severity.safeParse(c.severity);
+        if (counts && sev.success) counts[sev.data] += c.n;
       }
     }
 
@@ -177,6 +227,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         score: review ? review.score : null,
         cost_usd: cost?.cost ?? null,
         cost_partial: cost?.partial ?? false,
+        finding_counts: findingCountsByPr.get(r.id) ?? null,
       };
     });
   });

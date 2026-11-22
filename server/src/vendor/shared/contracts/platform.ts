@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Provider } from './knowledge.js';
+import { SeverityCounts } from './findings.js';
 
 /**
  * Platform / scaffolding DTOs owned by F1:
@@ -177,6 +178,9 @@ export const PrMeta = z.object({
   // the LLM has an unknown cost, so the total may be higher.
   cost_usd: z.number().nullish(),
   cost_partial: z.boolean().optional(),
+  // Open findings per severity (list endpoint only): the latest review of each
+  // agent, dismissed findings excluded. null/absent until the PR is reviewed.
+  finding_counts: SeverityCounts.nullish(),
 });
 export type PrMeta = z.infer<typeof PrMeta>;
 
