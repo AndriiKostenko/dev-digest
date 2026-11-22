@@ -40,6 +40,15 @@ export const s = {
   } satisfies CSSProperties,
   sizeBadgeBorder: (color: string): CSSProperties => ({ border: `1px solid ${color}` }),
   scoreCell: { display: "flex", alignItems: "center" } satisfies CSSProperties,
+  findingsCell: { display: "flex", alignItems: "center" } satisfies CSSProperties,
+  /** marginLeft cancels SeverityCount's 6px side padding so icons line up with the header. */
+  findingsCounts: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    flexWrap: "wrap",
+    marginLeft: -6,
+  } satisfies CSSProperties,
   costCell: {
     fontSize: 13,
     color: "var(--text-secondary)",

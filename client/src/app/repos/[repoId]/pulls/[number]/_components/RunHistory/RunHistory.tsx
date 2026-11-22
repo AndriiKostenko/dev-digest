@@ -3,8 +3,10 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { Badge, Icon, CircularScore, type IconName } from "@devdigest/ui";
-import type { RunSummary, PrCommit } from "@devdigest/shared";
+import type { RunSummary, PrCommit, SeverityCounts } from "@devdigest/shared";
 import { formatCost } from "@/lib/format-cost";
+import { SEVERITY_LEVELS, isEmptyCounts } from "@/lib/severity";
+import { SeverityCount } from "@/components/severity-count";
 
 /**
  * PR timeline — every agent run interleaved with the PR's commits, newest-first
@@ -91,9 +93,13 @@ export function RunHistory({
   onOpenTrace,
   onGoToReview,
   onDelete,
+  severityByRun,
 }: {
   runs: RunSummary[];
   commits?: PrCommit[];
+  /** Findings per severity for each run id (from the PR's reviews). When a run has
+   *  counts, its row shows icon + count per level instead of "N finding(s)". */
+  severityByRun?: Record<string, SeverityCounts>;
   /** Open the trace + log drawer for a run (the logs icon). */
   onOpenTrace: (runId: string) => void;
   /** Jump to this run's inline review accordion below (clicking the agent name). */
@@ -150,6 +156,8 @@ export function RunHistory({
         const r = item.run;
         const o = outcomeOf(r);
         const settled = r.status === "done";
+        const sevCounts = severityByRun?.[r.run_id];
+        const blockersText = (r.blockers ?? 0) > 0 ? t("runStatus.blockers", { count: r.blockers ?? 0 }) : "";
         return (
           <div key={`run:${r.run_id}`} style={rowStyle}>
             <Badge color={o.color} bg={o.bg} icon={o.icon}>
@@ -189,12 +197,28 @@ export function RunHistory({
                   {r.error}
                 </div>
               )}
-              {settled && (
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  {t("runStatus.findings", { count: r.findings_count ?? 0 })}
-                  {(r.blockers ?? 0) > 0 ? t("runStatus.blockers", { count: r.blockers ?? 0 }) : ""}
-                </div>
-              )}
+              {settled &&
+                (sevCounts && !isEmptyCounts(sevCounts) ? (
+                  // Icon + count per level (like the PR list's FINDINGS column); the
+                  // label is kept for screen readers and as a tooltip.
+                  <div
+                    data-testid="run-severity"
+                    // marginLeft cancels SeverityCount's 6px side padding (there for the
+                    // filter's active fill) so the icons line up with the agent name.
+                    style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 2, marginLeft: -6, fontSize: 12, color: "var(--text-muted)" }}
+                  >
+                    {SEVERITY_LEVELS.filter((sev) => sevCounts[sev] > 0).map((sev) => (
+                      <SeverityCount key={sev} severity={sev} count={sevCounts[sev]} />
+                    ))}
+                    {blockersText && <span>{blockersText}</span>}
+                  </div>
+                ) : (
+                  // No review loaded for this run yet, or nothing found → plain text.
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    {t("runStatus.findings", { count: r.findings_count ?? 0 })}
+                    {blockersText}
+                  </div>
+                ))}
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>
               {r.ran_at && <span>{new Date(r.ran_at).toLocaleTimeString()}</span>}

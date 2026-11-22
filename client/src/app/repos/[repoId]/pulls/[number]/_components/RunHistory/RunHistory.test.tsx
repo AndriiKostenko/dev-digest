@@ -7,7 +7,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
-import type { RunSummary } from "@devdigest/shared";
+import type { RunSummary, SeverityCounts } from "@devdigest/shared";
 import messages from "../../../../../../../../messages/en/prReview.json";
 import { RunHistory } from "./RunHistory";
 
@@ -35,10 +35,10 @@ function run(o: Partial<RunSummary>): RunSummary {
   };
 }
 
-function renderRuns(runs: RunSummary[]) {
+function renderRuns(runs: RunSummary[], severityByRun?: Record<string, SeverityCounts>) {
   return render(
     <NextIntlClientProvider locale="en" messages={{ prReview: messages }}>
-      <RunHistory runs={runs} onOpenTrace={() => {}} />
+      <RunHistory runs={runs} onOpenTrace={() => {}} severityByRun={severityByRun} />
     </NextIntlClientProvider>,
   );
 }
@@ -94,5 +94,33 @@ describe("RunHistory — run cost", () => {
     ]);
     expect(screen.queryByTitle("Run cost")).not.toBeInTheDocument();
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
+  });
+});
+
+describe("RunHistory — severity icons", () => {
+  it("shows icon + count per level and the blockers instead of 'N finding(s)'", () => {
+    const { container } = renderRuns(
+      [run({ status: "done", findings_count: 3, blockers: 2, score: 38 })],
+      { "run-1": { CRITICAL: 2, WARNING: 1, SUGGESTION: 0 } },
+    );
+    const levels = Array.from(container.querySelectorAll("[data-severity]")).map((el) => el.textContent);
+    expect(levels).toEqual(["2 Critical", "1 Warning"]);
+    expect(screen.getByTestId("run-severity")).toHaveTextContent(/2 blockers/);
+    expect(screen.queryByText(/finding\(s\)/)).not.toBeInTheDocument();
+  });
+
+  it("falls back to the text when the run's review is not loaded", () => {
+    const { container } = renderRuns([run({ status: "done", findings_count: 3, blockers: 0, score: 72 })], {});
+    expect(container.querySelector("[data-severity]")).toBeNull();
+    expect(screen.getByText("3 finding(s)")).toBeInTheDocument();
+  });
+
+  it("keeps the text for a run that found nothing", () => {
+    const { container } = renderRuns(
+      [run({ status: "done", findings_count: 0, blockers: 0, score: 95 })],
+      { "run-1": { CRITICAL: 0, WARNING: 0, SUGGESTION: 0 } },
+    );
+    expect(container.querySelector("[data-severity]")).toBeNull();
+    expect(screen.getByText("0 finding(s)")).toBeInTheDocument();
   });
 });
