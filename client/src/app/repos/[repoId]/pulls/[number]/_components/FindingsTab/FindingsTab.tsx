@@ -6,6 +6,7 @@ import { RunStatus } from "../RunStatus";
 import { RunHistory } from "../RunHistory/RunHistory";
 import { ReviewRunAccordion } from "../ReviewRunAccordion";
 import { s } from "./styles";
+import { countsByRun } from "@/lib/severity";
 import type { FindingRecord, ReviewRecord, RunSummary, PrCommit } from "@devdigest/shared";
 import type { UseMutationResult } from "@tanstack/react-query";
 
@@ -71,6 +72,10 @@ export function FindingsTab({
     setTarget((p) => ({ runId, n: (p?.n ?? 0) + 1 }));
   }, []);
 
+  // Timeline severity icons: the reviews (with findings) are already loaded for
+  // the Review runs below, so counts per run need no extra request.
+  const severityByRun = React.useMemo(() => countsByRun(runs), [runs]);
+
   return (
     <section>
       {liveRunIds.length > 0 && (
@@ -134,6 +139,7 @@ export function FindingsTab({
             onOpenTrace={handleOpenTrace}
             onGoToReview={handleGoToReview}
             onDelete={handleDelete}
+            severityByRun={severityByRun}
           />
         </div>
       )}

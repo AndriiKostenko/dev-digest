@@ -16,6 +16,7 @@ import {
   Settings,
   Repo,
   PrDetail,
+  PrMeta,
 } from '@devdigest/shared';
 
 /**
@@ -214,5 +215,27 @@ describe('platform DTOs', () => {
         commits: [],
       }),
     ).not.toThrow();
+  });
+
+  it('PrMeta.finding_counts is optional, nullable, and needs every severity level', () => {
+    const base = {
+      number: 482,
+      title: 't',
+      author: 'a',
+      branch: 'b',
+      base: 'main',
+      head_sha: 'sha',
+      additions: 1,
+      deletions: 0,
+      files_count: 1,
+      status: 'needs_review',
+    };
+    expect(() => PrMeta.parse(base)).not.toThrow();
+    expect(PrMeta.parse({ ...base, finding_counts: null }).finding_counts).toBeNull();
+    expect(
+      PrMeta.parse({ ...base, finding_counts: { CRITICAL: 2, WARNING: 0, SUGGESTION: 1 } })
+        .finding_counts,
+    ).toEqual({ CRITICAL: 2, WARNING: 0, SUGGESTION: 1 });
+    expect(() => PrMeta.parse({ ...base, finding_counts: { CRITICAL: 2 } })).toThrow();
   });
 });

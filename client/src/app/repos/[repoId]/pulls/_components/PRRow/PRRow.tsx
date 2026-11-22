@@ -7,6 +7,8 @@ import { useTranslations } from "next-intl";
 import { Icon, Avatar, Badge, CircularScore } from "@devdigest/ui";
 import type { PrMeta } from "@/lib/types";
 import { formatCost } from "@/lib/format-cost";
+import { SEVERITY_LEVELS, isEmptyCounts } from "@/lib/severity";
+import { SeverityCount } from "@/components/severity-count";
 import { SIZE_COLOR, STATUS_META } from "../../constants";
 import { relativeTime, sizeOf } from "../../helpers";
 import { s } from "../../styles";
@@ -52,6 +54,19 @@ export function PRRow({ pr, repoId }: { pr: PrMeta; repoId: string }) {
           <CircularScore score={pr.score!} size={34} stroke={3} />
         ) : (
           <span style={s.muted}>—</span>
+        )}
+      </div>
+      <div style={s.findingsCell}>
+        {/* Open findings per level (latest review of each agent, dismissed excluded);
+            never reviewed or nothing open → — */}
+        {isEmptyCounts(pr.finding_counts) ? (
+          <span style={s.muted}>—</span>
+        ) : (
+          <span style={s.findingsCounts}>
+            {SEVERITY_LEVELS.filter((sev) => pr.finding_counts![sev] > 0).map((sev) => (
+              <SeverityCount key={sev} severity={sev} count={pr.finding_counts![sev]} />
+            ))}
+          </span>
         )}
       </div>
       <div>
